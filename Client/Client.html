@@ -1,0 +1,245 @@
+﻿<!DOCTYPE html>
+<html>
+
+<body>
+
+    <h1>SignalR Client</h1>
+    <p id="stateLabel">Ready to connect</p>
+    <label>ConnID: </label>
+    <span id="connIDLabel">N/a</span>
+    <span style="font-style: italic;"> --The ID of this connection</span>
+    <div>
+        <label for="connectionUrl">SignalR Server URL:</label>
+        <input id="connectionUrl" size="30" />
+        <button id="connectButton" type="submit">Connect</button>
+        <button id="closeButton" disabled>Close Socket</button>
+        <label style="font-style: italic;">-- This connects the client to the server</label>
+    </div>
+    <p></p>
+    <div>
+        <label for="sendMessage">Message:</label>
+        <input id="sendMessage" disabled />
+        <button id="sendButton" type="submit" disabled>Send</button>
+        <label style="font-style: italic;">-- This is a TWO way communication between the server and the client/s</label>
+    </div>
+    <p></p>
+    <div>
+        <label for="recipients">Recipient IDs:</label>
+        <input id="recipients" disabled />
+        <label style="font-style: italic;">-- This connects the client to another client by ID</label>
+    </div>
+    <p></p>
+    <div>
+        <label for="getChartData">Get Chart Data:</label>
+        <button id="getChartDataButton" type="submit">Get Chart Data</button>
+        <label style="font-style: italic;">-- This is a ONE way communication from the server to the client/s. There is no interaction back to the server</label>
+    </div>
+    <p></p>
+    <h2>User Log</h2>
+    <table style="width: 800px">
+        <thead>
+            <tr>
+                <td style="width: 100px">From</td>
+                <td style="width: 100px">To</td>
+                <td>Data</td>
+            </tr>
+        </thead>
+        <tbody id="commsLog" style="width: 100%;">
+        </tbody>
+    </table>
+    <p></p>
+
+
+
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.5.0/Chart.min.js"></script>
+    <script src="signalr.min.js"></script>
+    <!--<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.0-preview.7.21378.6/signalr.min.js"></script>-->
+    <canvas id="myChart" style="width:100%;max-width:600px"></canvas>
+
+    <script>
+
+        "use strict";
+        var connectionUrl = document.getElementById("connectionUrl");
+        var connectButton = document.getElementById("connectButton");
+        var stateLabel = document.getElementById("stateLabel");
+        var sendMessage = document.getElementById("sendMessage");
+        var sendButton = document.getElementById("sendButton");
+        var commsLog = document.getElementById("commsLog");
+        var closeButton = document.getElementById("closeButton");
+        var recipients = document.getElementById("recipients");
+        var connID = document.getElementById("connIDLabel");
+        var xValues;
+        var yValues;
+        var barColors;
+        connectionUrl.value = "https://localhost:5001/chatHub";
+
+        var hubConnection = new signalR.HubConnectionBuilder().withUrl(connectionUrl.value).build();
+
+        //CONNECT BUTTON
+        connectButton.onclick = function () {
+            stateLabel.innerHTML = "Attempting to connect...";
+
+            hubConnection.start().then(function () {
+                updateState();
+
+                commsLog.innerHTML += '<tr>' +
+                    '<td colspan="3" class="commslog-data">Connection opened</td>' +
+                    '</tr>';
+            });
+        };
+
+        closeButton.onclick = function () {
+            if (!hubConnection || hubConnection.state !== "Connected") {
+                alert("Hub Not Connected");
+            }
+            hubConnection.stop().then(function () {
+
+            });
+        };
+
+        //CLOSE EVENT
+        hubConnection.onclose(function (event) {
+            updateState();
+            commsLog.innerHTML += '<tr>' +
+                '<td colspan="3" class="commslog-data">Connection disconnected </td>' +
+                '</tr>';
+        });
+
+
+        hubConnection.on("ReceiveMessage", function (message) {
+            commsLog.innerHTML += '<tr>' +
+                '<td class="commslog-server">Server</td>' +
+                '<td class="commslog-client">Client</td>' +
+                '<td class="commslog-data">' + (message) + '</td></tr>';
+        });
+
+        hubConnection.on("ReceiveConnectionID", function (connid) {
+            connID.innerHTML = connid;
+            commsLog.innerHTML += '<tr>' +
+                '<td colspan="3" class="commslog-data">Connection ID Received from Hub</td>' +
+                '</tr>';
+        });
+
+        function GetChartData() {
+            hubConnection.on("transferchartdata", function (data) {
+                // commsLog.innerHTML += "data = " + JSON.stringify(data);
+                var result = JSON.parse(data);
+                // commsLog.innerHTML += "data1 = " + result.xValues;
+                xValues = result.xValues;
+                yValues = result.yValues;
+                barColors = result.barColors;
+                loadChartData();
+            });
+        }
+
+        getChartDataButton.onclick = function () {
+            GetChartData();
+            const Http = new XMLHttpRequest();
+            const url = 'https://localhost:5001/api/home';
+            Http.open("GET", url);
+            Http.send();
+            Http.onreadystatechange = (e) => {
+                commsLog.innerHTML += Http.responseText;
+            }
+        };
+
+        sendButton.onclick = function () {
+            var message = constructJSONPayload();
+            hubConnection.invoke("SendMessageAsync", message);
+            console.debug("SendMessage Invoked, on ID: " + hubConnection.id);
+            commsLog.innerHTML += '<tr>' +
+                '<td class="commslog-client">Client</td>' +
+                '<td class="commslog-server">Server</td>' +
+                '<td class="commslog-data">' + (message) + '</td></tr>';
+            event.preventDefault();
+        };
+
+        //function htmlEscape(str) {
+        //    return str.toString()
+        //        .replace(/&/g, '&amp;')
+        //        .replace(/"/g, '&quot;')
+        //        .replace(/'/g, '&#39;')
+        //        .replace(/</g, '&lt;')
+        //        .replace(/>/g, '&gt;');
+        //}
+
+        function constructJSONPayload() {
+            return JSON.stringify({
+                "From": connID.innerHTML.substring(8, connID.innerHTML.length),
+                "To": recipients.value,
+                "Message": sendMessage.value
+            });
+        }
+
+
+        function updateState() {
+            function disable() {
+                sendMessage.disabled = true;
+                sendButton.disabled = true;
+                closeButton.disabled = true;
+                recipients.disabled = true;
+
+            }
+            function enable() {
+                sendMessage.disabled = false;
+                sendButton.disabled = false;
+                closeButton.disabled = false;
+                recipients.disabled = false;
+
+            }
+            connectionUrl.disabled = true;
+            connectButton.disabled = true;
+            if (!hubConnection) {
+                disable();
+            } else {
+                switch (hubConnection.state) {
+                    case "Disconnected":
+                        stateLabel.innerHTML = "Disconnected";
+                        connID.innerHTML = "N/a"
+                        disable();
+                        connectionUrl.disabled = false;
+                        connectButton.disabled = false;
+                        break;
+                    case "Connecting":
+                        stateLabel.innerHTML = "Connecting...";
+                        disable();
+                        break;
+                    case "Connected":
+                        stateLabel.innerHTML = "Connected";
+                        enable();
+                        break;
+                    default:
+                        stateLabel.innerHTML = "Unknown WebSocket State: " + (hubConnection.state);
+                        disable();
+                        break;
+                }
+            }
+        }
+
+
+        //Chart
+        function loadChartData() {
+            new Chart("myChart", {
+                type: "bar",
+                data: {
+                    labels: xValues,
+                    datasets: [{
+                        backgroundColor: barColors,
+                        data: yValues
+                    }]
+                },
+                options: {
+                    hover: { mode: null },
+                    legend: { display: false },
+                    title: {
+                        display: true,
+                        text: "Random statistics"
+                    }
+                }
+            });
+        };
+    </script>
+
+</body>
+</html>
